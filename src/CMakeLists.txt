@@ -50,6 +50,7 @@ add_subdirectory(util)
 add_subdirectory(imgui)
 add_subdirectory(resource)
 add_subdirectory(asm)
+add_subdirectory(LCEMU)
 
 add_executable(CemuBin
 	main.cpp
@@ -133,6 +134,7 @@ target_link_libraries(CemuBin PRIVATE
 	CemuUtil
 	OpenGL::GL
 	SDL2::SDL2
+	LCEMU
 )
 
 if(UNIX AND NOT APPLE)
