@@ -52,6 +52,7 @@ bin/gameProfiles/*
 
 bin/graphicPacks/*
 bin/macro/*
+bin/memorySearcher/*
 
 # Ignore Finder view option files created by OS X
 .DS_Store

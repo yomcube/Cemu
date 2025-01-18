@@ -9,7 +9,7 @@ using namespace std;
 namespace fs = std::filesystem;
 
 #define TOOL_NAME "LCEMU"
-#define TOOL_VER "0.0.13-rev2"
+#define TOOL_VER "0.0.13-rev3"
 #define TOOL_VER_EX ""
 
 constexpr int CS_W = 300;

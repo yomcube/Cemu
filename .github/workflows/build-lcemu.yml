@@ -1,0 +1,85 @@
+name: Build LCEMU
+
+on:
+  workflow_dispatch:
+    inputs:
+      next_version_major:
+        required: false
+        type: string
+      next_version_minor:
+        required: false
+        type: string
+
+env:
+  VCPKG_ROOT: "${{github.workspace}}/dependencies/vcpkg"
+  VCPKG_BINARY_SOURCES: 'clear;nuget,GitHub,readwrite'
+
+jobs:
+  build-windows:
+    runs-on: windows-2025
+    steps:
+    - name: "Checkout repo"
+      uses: actions/checkout@v4
+      with:
+        submodules: "recursive"
+
+    - name: Setup release mode parameters
+      run: |
+        echo "BUILD_MODE=release" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+        echo "BUILD_FLAGS=" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+        echo "Build mode is release"
+
+    - name: Setup build flags for version
+      if: ${{ inputs.next_version_major != '' }}
+      run: |
+        echo "[INFO] Version ${{ inputs.next_version_major }}.${{ inputs.next_version_minor }}"
+        echo "BUILD_FLAGS=${{ env.BUILD_FLAGS }} -DEMULATOR_VERSION_MAJOR=${{ inputs.next_version_major }} -DEMULATOR_VERSION_MINOR=${{ inputs.next_version_minor }}" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+
+    - name: "Setup cmake"
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '3.29.0'
+
+    - name: "Bootstrap vcpkg"
+      run: |
+        ./dependencies/vcpkg/bootstrap-vcpkg.bat
+        
+    - name: 'Setup NuGet Credentials for vcpkg'
+      shell: 'bash'
+      run: |
+        `./dependencies/vcpkg/vcpkg.exe fetch nuget | tail -n 1` \
+        sources add \
+        -source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+        -storepasswordincleartext \
+        -name "GitHub" \
+        -username "${{ github.repository_owner }}" \
+        -password "${{ secrets.GITHUB_TOKEN }}"
+        `./dependencies/vcpkg/vcpkg.exe fetch nuget | tail -n 1` \
+        setapikey "${{ secrets.GITHUB_TOKEN }}" \
+        -source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+        
+    - name: "cmake"
+      run: |
+        mkdir -p build
+        cd build
+        echo "[INFO] BUILD_FLAGS: ${{ env.BUILD_FLAGS }}"
+        echo "[INFO] BUILD_MODE: ${{ env.BUILD_MODE }}"
+        cmake .. ${{ env.BUILD_FLAGS }} -DCMAKE_BUILD_TYPE=${{ env.BUILD_MODE }} -DVCPKG_INSTALL_OPTIONS="--clean-after-build"
+        
+    - name: "Build LCEMU"
+      run: |
+        cd build
+        cmake --build . --config ${{ env.BUILD_MODE }}
+
+    - name: Prepare artifact
+      run: |
+        Rename-Item bin/Cemu_release.exe LCEMU.exe
+        mkdir ./bin/macro
+        touch ./bin/macro/PUT_MACRO_FILES_HERE
+      
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: LCEMU
+        path: ./bin
+        compression-level: 9
