@@ -1,7 +1,8 @@
 #include "gui_utils.h"
+#include <dwmapi.h>
 #pragma comment(lib, "Dwmapi.lib")
 
-HWND util_CreateWindow(const TCHAR* win_class, const TCHAR* title, const WNDPROC& proc, const COLORREF& Background, const UINT style)
+HWND UtilCreateWindow(const TCHAR* win_class, const TCHAR* title, const WNDPROC& proc, const COLORREF& Background, const UINT style)
 {
 	WNDCLASS wc;
 	HWND hwnd;
@@ -27,7 +28,7 @@ HWND util_CreateWindow(const TCHAR* win_class, const TCHAR* title, const WNDPROC
 	return hwnd;
 }
 
-void messageLoop(HWND& hwnd) {
+void MessageLoop(const HWND& hwnd) {
 	MSG msg;
 	while (GetMessage(&msg, hwnd, 0, 0))
 	{
@@ -36,7 +37,7 @@ void messageLoop(HWND& hwnd) {
 	}
 }
 
-bool fixWindowCornor(HWND hwnd)
+bool FixWindowCornor(const HWND& hwnd)
 {
 	const DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_DONOTROUND;
 	return S_OK == DwmSetWindowAttribute(
@@ -44,4 +45,14 @@ bool fixWindowCornor(HWND hwnd)
 					   33, // DWMWA_WINDOW_CORNER_PREFERENCE,
 					   &corner,
 					   sizeof(DWM_WINDOW_CORNER_PREFERENCE));
+}
+
+std::pair<int, int> CalcWindowSize(const HWND& hwnd, const int& client_w, const int& client_h) {
+	RECT wr, cr;
+	GetWindowRect(hwnd, &wr);
+	GetClientRect(hwnd, &cr);
+	return {
+		(wr.right - wr.left) - (cr.right - cr.left) + client_w,
+		(wr.bottom - wr.top) - (cr.bottom - cr.top) + client_h
+	};
 }

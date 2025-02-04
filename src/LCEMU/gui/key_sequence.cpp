@@ -1,39 +1,64 @@
 #include "key_sequence.h"
+#include "gui_utils.h"
+#include <string>
+#include <vector>
+#include <thread>
+
 // todo: improve config
 using namespace std;
 
-static const int WINDOW_W = 200;
-static const int WINDOW_H = 220;
-static const int FONT_SIZE = 25;
-static const int AHEAD = 5;
-static const int X_STEP = 14;
-static const int Y_STEP = 22;
-static const int Y_START = 11;
-static const int X_START = 11;
+static constexpr int WINDOW_W = 200;
+static int window_height = 220; // dummy
+static constexpr int FONT_SIZE = 25;
+static constexpr int X_STEP = 14;
+static constexpr int Y_STEP = 22;
+static constexpr int Y_START = 11;
+static constexpr int X_START = 11;
+static constexpr int Y_END_PADDING = 2;
+static constexpr int PAD_LINE_HEIGHT = 1;
 
-static const COLORREF COL_NO_KEY = RGB(0x34, 0x34, 0x34);
-static const COLORREF COL_KEY = RGB(0xff, 0xff, 0xff);
-static const COLORREF COL_FRAME = RGB(0xff, 0xff, 0xff);
-static const COLORREF COL_FIN_FRAME = RGB(0xff, 0xff, 0xff);
-static const COLORREF COL_NOW_BACK = RGB(0x00, 0x00, 0x33);
-static const COLORREF COL_TSTART_BACK = RGB(0x3e, 0x00, 0);
+static constexpr COLORREF COL_NO_KEY = RGB(0x34, 0x34, 0x34);
+static constexpr COLORREF COL_KEY = RGB(0xff, 0xff, 0xff);
+static constexpr COLORREF COL_FRAME = RGB(0xcc, 0xff, 0xff);
+static constexpr COLORREF COL_FIN_FRAME = RGB(0xff, 0xff, 0xff);
+static constexpr COLORREF COL_NOW_BACK = RGB(0x00, 0x00, 0x33);
+static constexpr COLORREF COL_START_END_BACK = RGB(0x3e, 0x00, 0);
+
+static constexpr COLORREF COL_PAD_LINE = RGB(0x33, 0x33, 0xbe);
+static constexpr COLORREF COL_PAD_TEXT = RGB(0, 0, 0);
+static constexpr COLORREF COL_PAD_ON = COL_KEY;
+// static constexpr COLORREF COL_PAD_ON = RGB(0xFF, 0x30, 0x30);
+//static constexpr COLORREF COL_PAD_ON = RGB(0x00, 0x55, 0xff);
+static constexpr COLORREF COL_PAD_OFF = COL_NO_KEY;
 static HWND hwnd;
 
-static int now_pos = -1;
-static int now_frame = 0;
-static vector<string> now_data;
-static const char * all_show;
-static string no_show;
-static bool is_finished = false;
-static int now_tstart = 0;
-static bool is_waiting_event = false;
+static MacroManager* mgrp;
 
-static string get_data(int pos) {
+
+static constexpr int SHOWMODE_NONE = 0;
+static constexpr int SHOWMODE_PART = 1;
+static constexpr int SHOWMODE_FULL = 2;
+static int cfg_pre_seq = 3;
+static bool cfg_now_as_pad = true;
+static int cfg_show_frames = SHOWMODE_PART;
+
+bool keyseq_config_validate(const int& preseq, const bool& now_as_pad, const int& show_frame_mode) {
+	if (preseq < 0 || preseq > 256)
+		return false;
+	if (show_frame_mode < 0 || show_frame_mode > SHOWMODE_FULL)
+		return false;
+	return true;
+}
+
+
+static bool resize_request = true;
+
+static const string& get_data(const int& pos) {
 	if (pos < 0)
-		return no_show;
-	if (pos >= now_data.size())
-		return no_show;
-	return now_data[pos];
+		return mgrp->get_mapping().empty_show;
+	if (pos >= mgrp->get_all_inputs().size())
+		return mgrp->get_mapping().empty_show;
+	return mgrp->get_all_inputs()[pos];
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -50,27 +75,28 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 	{
 		{
 			hdc = BeginPaint(hwnd, &ps);
-			HFONT hf = CreateFontW(FONT_SIZE, 0, 0, 0, FW_BOLD, 0, 0, 0,
+			const HFONT hf = CreateFontW(FONT_SIZE, 0, 0, 0, FW_BOLD, 0, 0, 0,
 								   ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, PROOF_QUALITY,
 								   FIXED_PITCH | FF_SWISS, NULL);
-			auto fnttmp = SelectObject(hdc, hf);
+			const auto fnttmp = SelectObject(hdc, hf);
 
 			int nowy = Y_START;
-			auto colback = GetTextColor(hdc);
-			auto bkback = GetBkColor(hdc);
+			const auto colback = GetTextColor(hdc);
+			const auto bkback = GetBkColor(hdc);
 
 			SetBkColor(hdc, 0);
 			// inputs
 			{
-				for (int i = 0; i <=  AHEAD; i++)
+				const int row = cfg_pre_seq + (int)(!cfg_now_as_pad);
+				for (int i = 0; i < row; i++)
 				{
-					int tar = now_pos + AHEAD - i;
-					auto s = get_data(tar);
-					if (!now_data.empty()  && (tar == now_tstart || tar + 1 == now_data.size()))
+					const int tar = mgrp->get_last_runned_input_index() + (row - (int)(!cfg_now_as_pad) - i);
+					const size_t all_input_sz = mgrp->get_all_inputs().size();
+					if (all_input_sz != 0 && (tar == mgrp->get_tstart_index() || tar + 1 == all_input_sz))
 					{
-						SetBkColor(hdc, COL_TSTART_BACK);
+						SetBkColor(hdc, COL_START_END_BACK);
 					}
-					else if (AHEAD == i)
+					else if (i + 1 == row && !cfg_now_as_pad)
 					{
 						SetBkColor(hdc, COL_NOW_BACK);
 					}
@@ -78,8 +104,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 					{
 						SetBkColor(hdc, 0);
 					}
-					const char* ap = all_show;
-					for (int j = 0, nowx = X_START; *ap; j++, nowx += X_STEP,ap++)
+
+					const auto& s = get_data(tar);
+					const char* ap = mgrp->get_mapping().all_show.c_str();
+					for (int j = 0, nowx = X_START; *ap; j++, nowx += X_STEP, ap++)
 					{
 						if (s[j] != ' ')
 						{
@@ -92,35 +120,114 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 							TextOutA(hdc, nowx, nowy, ap, 1);
 						}
 					}
+
 					nowy += Y_STEP;
 				}
+				nowy += max(0, FONT_SIZE - Y_STEP);
 			}
 
-			if (is_waiting_event)
-			{
-				SetTextColor(hdc, COL_KEY);
-				TextOutA(hdc, X_START, nowy - Y_STEP, "[WAITING...]", lstrlenA("[WAITING...]"));
-			}
+
+			//if (is_waiting_event)
+			//{
+			//	SetTextColor(hdc, COL_KEY);
+			//	TextOutA(hdc, X_START, nowy - Y_STEP, "[WAITING...]", lstrlenA("[WAITING...]"));
+			//}
 		
-			SetBkColor(hdc, 0);
-			if(is_finished) // bitrate reduce
-			{ // frame
-				nowy += FONT_SIZE - Y_STEP;
-				auto st = to_string(now_frame) + "f";
-				auto cst = st.c_str();
-				nowy += 3;
-				if (is_finished)
-				{
-					SetTextColor(hdc, COL_FIN_FRAME);
-					TextOutA(hdc, X_START, nowy, cst, lstrlenA(cst));
+			if(cfg_now_as_pad) { // dirty :(
+				SetBkColor(hdc, 0);
+				nowy++;
+				if (cfg_pre_seq > 0)
+				{ // split line
+					const auto hPen = CreatePen(PS_SOLID, PAD_LINE_HEIGHT, COL_PAD_LINE);
+					const auto hOldPen = SelectObject(hdc, hPen);
+					MoveToEx(hdc, X_START, nowy, NULL);
+					LineTo(hdc, X_START + X_STEP * mgrp->get_mapping().empty_show.size(), nowy);
+					SelectObject(hdc, hOldPen);
+					DeleteObject(hPen);
+					nowy += PAD_LINE_HEIGHT;
 				}
-				//else
-				//{
-				//	SetTextColor(hdc, COL_FRAME);
-				//	TextOutA(hdc, X_START, nowy, cst, lstrlenA(cst));
-				//}
+				const auto last_input = mgrp->get_last_input().input_status;
+
+				//const auto hOffBrush = CreateSolidBrush(COL_PAD_OFF);
+				//const auto hOnBrush = CreateSolidBrush(COL_PAD_ON);
+				//const auto hOldBrush = SelectObject(hdc, hOffBrush);
+				//const auto oldMode = SetBkMode(hdc, TRANSPARENT);
+				//SetTextColor(hdc, COL_PAD_TEXT);
+				#define PUT(idx, v, c) \
+					SetTextColor(hdc,(last_input & v) == 0 ? COL_PAD_OFF : COL_PAD_ON); \
+				/* SelectObject(hdc, (last_input & v) == 0 ? hOffBrush : hOnBrush); \
+					Rectangle(hdc, X_START + X_STEP * idx, nowy, X_START + X_STEP * idx + X_STEP, nowy + Y_STEP); */ \
+					TextOutA(hdc, X_START + X_STEP * idx, nowy, c, lstrlenA(c)); 
+				/*
+				L..........R
+				..U......X..
+				.<.>.-+.Y.A.
+				..v......B..
+				*/
+				PUT(0, VPAD_L, "L");
+				PUT(11, VPAD_R, "R");
+				nowy += Y_STEP;
+				PUT(2, VPAD_UP, "^");
+				PUT(9, VPAD_X, "X");
+				nowy += Y_STEP;
+				PUT(1, VPAD_LEFT, "<");
+				PUT(3, VPAD_RIGHT, ">");
+				PUT(5, VPAD_MINUS, "-");
+				PUT(6, VPAD_PLUS, "+");
+				PUT(8, VPAD_Y, "Y");
+				PUT(10, VPAD_A, "A");
+				nowy += Y_STEP;
+				PUT(2, VPAD_DOWN, "v");
+				PUT(9, VPAD_B, "B");
+				#undef PUT
+				nowy += FONT_SIZE;
+
+				//SetBkMode(hdc, oldMode);
+				//SelectObject(hdc, hOldBrush);
+				//DeleteObject(hOffBrush);
+				//DeleteObject(hOnBrush);
+
+			}
+
+			if (cfg_show_frames != SHOWMODE_NONE) 
+			{ // frame
+				const bool is_finished = !mgrp->is_running();
+				int tar_frame;
+
+				if (cfg_show_frames == SHOWMODE_FULL || is_finished)
+					tar_frame = mgrp->get_now_frame_count();
+				else if (mgrp->get_requested_show_frames() >= 0) 
+					tar_frame = mgrp->get_requested_show_frames();
+				else tar_frame = -1;
+				nowy++;
+
+				if (tar_frame >= 0)
+				{
+					SetBkColor(hdc, 0);
+					const auto st = to_string(tar_frame) + "f   ";
+					const auto cst = st.c_str();
+					if (is_finished)
+					{
+						SetTextColor(hdc, COL_FIN_FRAME);
+						TextOutA(hdc, X_START, nowy, cst, lstrlenA(cst));
+					}
+					else
+					{
+						SetTextColor(hdc, COL_FRAME);
+						TextOutA(hdc, X_START, nowy, cst, lstrlenA(cst));
+					}
+				}
 				nowy += FONT_SIZE;
 			}
+
+			if (resize_request)
+			{
+				window_height = CalcWindowSize(hwnd, WINDOW_W, nowy + 1).second + Y_END_PADDING;
+				SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, WINDOW_W, window_height, SWP_SHOWWINDOW | SWP_NOMOVE);
+
+				resize_request = false;
+			}
+
 			SetTextColor(hdc, colback);
 			SetBkColor(hdc, bkback);
 			DeleteObject(SelectObject(hdc, fnttmp));
@@ -136,49 +243,38 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
 static void window_main()
 {
-	hwnd = util_CreateWindow(TEXT("Input viewer"), TEXT("Input viewer"), WndProc, 0, GUI_NO_CLOSE_WINDOW);
+	hwnd = UtilCreateWindow(TEXT("Input viewer"), TEXT("Input viewer"), WndProc, 0, GUI_NO_CLOSE_WINDOW);
 	if (!hwnd)
 		return;
 	ShowWindow(hwnd, SW_SHOW);
-	SetWindowPos(hwnd, HWND_TOPMOST, 0, 110, WINDOW_W, WINDOW_H, SWP_SHOWWINDOW);
-	fixWindowCornor(hwnd);
+	SetWindowPos(hwnd, HWND_TOPMOST, 0, 110, WINDOW_W, window_height, SWP_SHOWWINDOW);
+	FixWindowCornor(hwnd);
 	UpdateWindow(hwnd);
-	messageLoop(hwnd);
+	MessageLoop(hwnd);
 
 }
 
-void keyseq_set(std::vector<std::string>& d, int tstart) {
-	now_data = d;
-	now_tstart = tstart;
-	keyseq_reset();
-}
-
-void keyseq_reset()
+void keyseq_refresh(const bool& hard)
 {
-	now_pos = -1;
-	now_frame = 0;
-	is_finished = false;
-	InvalidateRect(hwnd, NULL, TRUE);
-}
-
-void keyseq_on_frame(const MacroManager& mgr)
-{
-	now_frame = mgr.get_now_frame_count();
-	now_pos = mgr.get_last_input_index();
-	is_finished = !mgr.is_running();
-	is_waiting_event = mgr.is_waiting_event();
-	InvalidateRect(hwnd, NULL, FALSE);
+	InvalidateRect(hwnd, NULL, hard);
 }
 
 
-void keyseq_init(string&all)
+void keyseq_init(MacroManager* _mgrp)
 {
-	all_show = all.c_str();
-	no_show.resize(all.size(), ' ');
+	mgrp = _mgrp;
 	std::thread _t(window_main);
 	_t.detach();
 }
 
-void keyseq_set_window_pos(int x, int y) {
-	SetWindowPos(hwnd, HWND_TOPMOST, x, y, WINDOW_W, WINDOW_H, SWP_SHOWWINDOW);
+void keyseq_set_window_pos(const int& x, const int& y) {
+	SetWindowPos(hwnd, HWND_TOPMOST, x, y, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE);
+}
+
+void keyseq_change_config(const int& preseq, const bool& now_as_pad, const int& show_frame_mode) {
+	cfg_pre_seq = preseq;
+	cfg_now_as_pad = now_as_pad;
+	cfg_show_frames = show_frame_mode;
+	resize_request = true;
+	keyseq_refresh(true);
 }

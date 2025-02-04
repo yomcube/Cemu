@@ -1,9 +1,9 @@
 #pragma once
 #include <windows.h>
-#include <dwmapi.h>
 #define GUI_NO_CLOSE_WINDOW CS_HREDRAW | CS_VREDRAW | CS_CLASSDC | CS_NOCLOSE
 
-HWND util_CreateWindow(const TCHAR* win_class, const TCHAR* title, const WNDPROC& proc, const COLORREF& Background, const UINT style);
-void messageLoop(HWND& hwnd);
+HWND UtilCreateWindow(const TCHAR* win_class, const TCHAR* title, const WNDPROC& proc, const COLORREF& Background, const UINT style);
+void MessageLoop(const HWND& hwnd);
 
-bool fixWindowCornor(HWND hwnd);
+bool FixWindowCornor(const HWND& hwnd);
+std::pair<int, int> CalcWindowSize(const HWND& hwnd, const int& client_w, const int& client_h);

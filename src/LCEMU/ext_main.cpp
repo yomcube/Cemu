@@ -1,15 +1,23 @@
 #include "ext_main.h"
-#include "vpad_ids.h"
 #include "utils.h"
-#include "macro_manager.h"
+#include "./macro_core/macro_manager.h"
+#include "./macro_core/vpad_ids.h"
 #include "gui/key_sequence.h"
 #include "../gui/guiWrapper.h"
+#include <thread>
+#include <windows.h>
+#include <boost/algorithm/string.hpp>
+#include <boost/algorithm/string/trim.hpp>
+#include <filesystem>
+#include <string>
+#include <fstream>
+#include <iostream>
 
 using namespace std;
 namespace fs = std::filesystem;
 
 #define TOOL_NAME "LCEMU"
-#define TOOL_VER "0.0.13-rev3"
+#define TOOL_VER "0.1.0"
 #define TOOL_VER_EX ""
 
 constexpr int CS_W = 300;
@@ -19,52 +27,42 @@ std::mutex cout_mtx;
 std::mutex running_mtx;
 extern WindowInfo g_window_info;
 
-inline static void set_mapping(MappingData& data,const char c, uint32 m, const char s, const int idx)
-{
-	data.to_key[c] = m;
-	data.to_show[c] = s;
-	data.to_show_index[c] = idx;
-	data.idxtoshow[idx] = s;
-}
-static void setup_mapping(MappingData& data)
+static inline void setup_mapping(MappingData& data)
 {
 	int idx = 1;
 	// J = B
-	set_mapping(data, 'B', VPAD_B, 'B', idx);
-	set_mapping(data, 'J', VPAD_B, 'B', idx++);
+	data.set('B', VPAD_B, 'B', idx);
+	data.set('J', VPAD_B, 'B', idx++);
 
-	set_mapping(data, 'A', VPAD_A, 'A', idx++);
-	set_mapping(data, 'Y', VPAD_Y, 'Y', idx++);
-	set_mapping(data, 'X', VPAD_X, 'X', idx++);
-
-
-	set_mapping(data, 'S', VPAD_L, 'L', idx);
-	set_mapping(data, 'L', VPAD_L, 'L', idx++);
-
-	set_mapping(data, 'R', VPAD_R, 'R', idx++);
-
-	set_mapping(data, 'V', VPAD_DOWN, 'v', idx);
-	set_mapping(data, 'D', VPAD_DOWN, 'v', idx++);
-
-	set_mapping(data, '~', VPAD_UP, '^', idx);
-	set_mapping(data, 'U', VPAD_UP, '^', idx++);
-
-	set_mapping(data, '>', VPAD_RIGHT, '>', idx++);
-	set_mapping(data, '<', VPAD_LEFT, '<', idx++);
+	data.set('A', VPAD_A, 'A', idx++);
+	data.set('Y', VPAD_Y, 'Y', idx++);
+	data.set('X', VPAD_X, 'X', idx++);
 
 
-	set_mapping(data, 'P', VPAD_PLUS, '+', idx++);
-	set_mapping(data, 'M', VPAD_MINUS, '-', idx++);
+	data.set('S', VPAD_L, 'L', idx);
+	data.set('L', VPAD_L, 'L', idx++);
 
-	set_mapping(data, 'N', VPAD_NULL, 0, 0); // neutral
+	data.set('R', VPAD_R, 'R', idx++);
 
-	data.none_show.resize(idx - 1, ' '); 
-	data.all_show.resize(idx - 1, ' ');
-	for (int i = 1; i < idx; i++)
-		data.all_show[i - 1] = data.idxtoshow[i];
+	data.set('V', VPAD_DOWN, 'v', idx);
+	data.set('D', VPAD_DOWN, 'v', idx++);
+
+	data.set('~', VPAD_UP, '^', idx);
+	data.set('U', VPAD_UP, '^', idx++);
+
+	data.set('>', VPAD_RIGHT, '>', idx++);
+	data.set('<', VPAD_LEFT, '<', idx++);
+
+
+	data.set('P', VPAD_PLUS, '+', idx++);
+	data.set('M', VPAD_MINUS, '-', idx++);
+
+	data.set('N', VPAD_NULL, 0, 0); // neutral
+
+	data.build_show_data(idx - 1, 1);
 }
 
-static void output(const string& s, bool new_line = true)
+static void output(const string& s, const bool new_line = true)
 {
 	std::lock_guard<std::mutex> _l(cout_mtx);
 	cout << s;
@@ -76,7 +74,7 @@ MacroManager macro_mgr;
 
 static void ctrl_loop()
 {
-	fs::path macro_dir = fs::current_path() / "macro";
+	const fs::path macro_dir = fs::current_path() / "macro";
 	string prepath_str = "./macro.txt";
 	while (1)
 	{
@@ -88,7 +86,7 @@ static void ctrl_loop()
 			std::lock_guard<std::mutex> _l(running_mtx);
 			boost::trim(instr);
 			vector<string> strs = split_space(instr);
-			string cmd = boost::to_upper_copy( strs[0]);
+			const string cmd = boost::to_upper_copy( strs[0]);
 			
 			if (cmd == "PWD")
 			{
@@ -101,23 +99,38 @@ static void ctrl_loop()
 			else if (cmd == "SEQPOS")
 			{
 				int py, px;
-				if (strs.size() < 2 || !try_int(strs[1], px, 0) || !try_int(strs[2], py, 0))
+				if (strs.size() < 3 || !try_int(strs[1], px, 0) || !try_int(strs[2], py, 0))
 				{
 					output("[ERROR] Arg error.");
 					continue;
 				}
 				keyseq_set_window_pos(px, py);
 			}
+			else if (cmd == "SEQCFG")
+			{
+				int pre_seq, now_pad, mode;
+				if (strs.size() < 4 || 
+					!try_int(strs[1], pre_seq, 0) || 
+					!try_int(strs[2], now_pad, 0) ||
+					!try_int(strs[3], mode, 0) ||
+					!keyseq_config_validate(pre_seq, now_pad, mode)
+					)
+				{
+					output("[ERROR] Arg error.");
+					continue;
+				}
+				keyseq_change_config(pre_seq, now_pad, mode);
+			}
 
-			#pragma region Macro
+#pragma region Macro
 			else if (cmd == "PRE")
 			{
 				output(prepath_str);
 			}
-			else if (cmd == "START" || cmd == "S")
+			else if (cmd == "START" || cmd == "S" || cmd == "STARTWITH" || cmd == "SW")
 			{
-				macro_mgr.start();
-				keyseq_reset();
+				macro_mgr.start(cmd == "STARTWITH" || cmd == "SW");
+				keyseq_refresh(true);
 				output("Started");
 			}
 			else if (cmd == "STOP" || cmd == "X")
@@ -125,9 +138,9 @@ static void ctrl_loop()
 				macro_mgr.stop();
 				output("Stopped");
 			}
-			else if (cmd == "LOAD" || cmd == "L" || cmd == "RELOAD" || cmd == "R" || cmd == "RS")
+			else if (cmd == "LOAD" || cmd == "L" || cmd == "RELOAD" || cmd == "R" || cmd == "RS" || cmd == "RSW")
 			{
-				bool is_rs = cmd == "RS";
+				const bool is_rs = cmd == "RS" || cmd == "RSW";
 				if (is_rs)
 					macro_mgr.stop();
 				if (macro_mgr.is_running())
@@ -138,7 +151,7 @@ static void ctrl_loop()
 				}
 				else
 				{
-					bool is_load = cmd == "LOAD" || cmd == "L";
+					const bool is_load = cmd == "LOAD" || cmd == "L";
 					if (is_load && strs.size() < 2)
 					{
 						output("[ERROR] Please specify a file.");
@@ -149,7 +162,7 @@ static void ctrl_loop()
 					fs::path path;
 					if (!try_eval_relative(path_str, macro_dir, path))
 					{
-						output("[ERROR] File not found: " + prepath_str);
+						output("[ERROR] File not found: " + path_str);
 						output("Load failed");
 						continue;
 					}
@@ -165,19 +178,19 @@ static void ctrl_loop()
 					}
 					
 					output("Loaded: " + path_str);
-					output(format("{} frames", macro_mgr.all_inputs.size()));
-					keyseq_set(macro_mgr.all_inputs, macro_mgr.tstart_index);
+					output(format("{} frames", macro_mgr.get_total_frame_count()));
 					if (is_rs)
 					{
-						macro_mgr.start();
-						keyseq_reset();
+						macro_mgr.start(cmd == "RSW");
 						output("Started");
 					}
+					keyseq_refresh(true);
 				}
 			}
 			else if (cmd == "DUMPMACRO" || cmd == "DUMPMACRO2")
 			{
-				if (macro_mgr.all_inputs.empty())
+				const auto& inputs = macro_mgr.get_all_inputs(); 
+				if (inputs.empty())
 				{
 					output("[ERROR] Macro is empty.");
 					continue;
@@ -190,7 +203,7 @@ static void ctrl_loop()
 						output("[ERROR] Parse error.");
 						continue;
 					}
-					else if (offset >= macro_mgr.all_inputs.size() || offset < 0)
+					else if (offset >= inputs.size() || offset < 0)
 					{
 						output("[ERROR] Out of range.");
 						continue;
@@ -211,11 +224,11 @@ static void ctrl_loop()
 					{
 						fprintf(fp, "start(f),end(f),input\n");
 					}
-					string pre = macro_mgr.all_inputs[offset];
+					string pre = inputs[offset];
 					int st = offset;
-					for (int i = offset + 1; i <= macro_mgr.all_inputs.size(); i++)
+					for (int i = offset + 1; i <= inputs.size(); i++)
 					{
-						if (macro_mgr.all_inputs.size() == i || pre != macro_mgr.all_inputs[i])
+						if (inputs.size() == i || pre != inputs[i])
 						{
 							const int l = st + 1 - offset;
 							const int r = i - offset;
@@ -228,21 +241,21 @@ static void ctrl_loop()
 								fprintf(fp, "%d,%d,%s\n", l, r, pre.c_str());
 							}
 							st = i;
-							if (macro_mgr.all_inputs.size() > i)
-								pre = macro_mgr.all_inputs[i];
+							if (i < inputs.size())
+								pre = inputs[i];
 						}
 					}
 
 					fclose(fp);
-					output("Success.");
+					output("Success");
 				}
 
 			}
-			#pragma endregion
+#pragma endregion
 
 			else
 			{
-				output("Unknown command");
+				output("[ERROR] Unknown command");
 			}
 		} // release lock
 	}
@@ -250,8 +263,8 @@ static void ctrl_loop()
 
 void ext_init()
 {
-	setup_mapping(macro_mgr.mapping);
-	keyseq_init(macro_mgr.mapping.all_show); // after mapping
+	setup_mapping(macro_mgr.get_mapping());
+	keyseq_init(&macro_mgr); // after mapping
 #ifndef CEMU_DEBUG_ASSERT
 	FreeConsole();
 	AllocConsole();
@@ -275,13 +288,12 @@ bool ext_onframe(uint32be& status)
 	// Frame Advance
 	// Todo: Config
 	if (g_window_info.get_keystate(VK_LSHIFT))
-		Sleep(480);
-
+		Sleep(500);
 
 	if (macro_mgr.is_running())
 	{
 		bool ret = macro_mgr.on_frame(status);
-		keyseq_on_frame(macro_mgr);
+		keyseq_refresh(false);
 		return ret;
 	}
 	else

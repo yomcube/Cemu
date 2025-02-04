@@ -7,6 +7,10 @@ add_library(LCEMU
 	utils.cpp
 	gui/gui_utils.h
 	gui/gui_utils.cpp
+	macro_core/macro_manager.h
+	macro_core/macro_manager.cpp
+	macro_core/vpad_ids.h
+	macro_core/macro_structs.h
 )
 
 set_property(TARGET LCEMU PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

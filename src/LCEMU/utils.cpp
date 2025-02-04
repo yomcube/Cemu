@@ -1,8 +1,10 @@
 #include "utils.h"
+#include <windows.h>
+#include <dwmapi.h>
 using namespace std;
 
 template<typename T>
-static T convert_int(const std::string& _str, T& tar, const T& fail, function<T(string&, int&)> fn)
+static T convert_int(const std::string& _str, T& tar, const T& fail, const function<T(string&, int&)>& fn)
 {
 	try
 	{
@@ -13,6 +15,7 @@ static T convert_int(const std::string& _str, T& tar, const T& fail, function<T(
 		else if (str.starts_with("0b") || str.starts_with("0B"))
 		{
 			 // need?
+			throw std::runtime_error("unsupported prefix.");
 		}
 		tar = fn(str, base);
 		return true;
@@ -25,17 +28,22 @@ static T convert_int(const std::string& _str, T& tar, const T& fail, function<T(
 
 bool try_int(const std::string& str, int& tar, const int& fail)
 {
-	return convert_int<int>(str, tar, fail, [](string& s, int& base) { return stoi(s, nullptr, base); });
+	return convert_int<int>(str, tar, fail, [](const string& s, const int& base) { return stoi(s, nullptr, base); });
 }
 
 bool try_ll(const std::string& str, long long int& tar, const long long int& fail)
 {
-	return convert_int<long long int>(str, tar, fail, [](string& s, int& base) { return stoll(s, nullptr, base); });
+	return convert_int<long long int>(str, tar, fail, [](const string& s, const int& base) { return stoll(s, nullptr, base); });
+}
+
+bool try_uint(const std::string& str, unsigned int& tar, const unsigned int& fail)
+{
+	return convert_int<unsigned int>(str, tar, fail, [](const string& s, const int& base) { return (unsigned int)stoul(s, nullptr, base); });
 }
 
 bool try_ull(const std::string& str, unsigned long long int& tar, const unsigned long long int& fail)
 {
-	return convert_int<unsigned long long int>(str, tar, fail, [](string& s, int& base) { return stoull(s, nullptr, base); });
+	return convert_int<unsigned long long int>(str, tar, fail, [](const string& s, const int& base) { return stoull(s, nullptr, base); });
 }
 
 bool try_dbl(const std::string& _str, double& tar, const double fail)
@@ -52,6 +60,13 @@ bool try_dbl(const std::string& _str, double& tar, const double fail)
 	}
 }
 
+std::string pad_left(const string& v, const char pad, const int padlen)
+{
+	string s(max(0, padlen - (int)v.size()), pad);
+	s += v;
+	return s;
+}
+
 
 std::vector<std::string> split_space(const std::string& str)
 {
@@ -64,7 +79,7 @@ std::vector<std::string> split_space(const std::string& str)
 		{
 			if (!now.empty())
 			{
-				res.push_back(now);
+				res.emplace_back(now);
 				now.clear();
 			}
 		}
@@ -75,7 +90,7 @@ std::vector<std::string> split_space(const std::string& str)
 		pos++;
 	}
 	if (res.empty())
-		res.push_back("");
+		res.emplace_back("");
 	return res;
 }
 
@@ -99,7 +114,7 @@ bool try_eval_relative(const std::filesystem::path& p, const std::filesystem::pa
 	}
 }
 
-const void put_with_color(const string& mes, const int color)
+void put_with_color(const string& mes, const int& color)
 {
 	HANDLE console = GetStdHandle(STD_OUTPUT_HANDLE);
 	CONSOLE_SCREEN_BUFFER_INFO s;
@@ -109,7 +124,7 @@ const void put_with_color(const string& mes, const int color)
 	SetConsoleTextAttribute(console, s.wAttributes);
 }
 
-void clear_screen(char fill)
+void clear_screen(const char& fill)
 {
 	COORD tl = {0, 0};
 	CONSOLE_SCREEN_BUFFER_INFO s;

@@ -1,13 +1,8 @@
 #pragma once
-#include <windows.h>
-#include <thread>
-#include <string>
-#include <vector>
-#include "gui_utils.h"
-#include "../macro_manager.h"
+#include "../macro_core/macro_manager.h"
 
-void keyseq_init(std::string&);
-void keyseq_set(std::vector<std::string>&, int);
-void keyseq_reset();
-void keyseq_on_frame(const MacroManager&);
-void keyseq_set_window_pos(int x, int y);
+void keyseq_init(MacroManager*);
+void keyseq_refresh(const bool& hard);
+void keyseq_set_window_pos(const int& x, const int& y);
+void keyseq_change_config(const int& preseq, const bool& now_as_pad, const int& show_frame_mode);
+bool keyseq_config_validate(const int& preseq, const bool& now_as_pad, const int& show_frame_mode);
