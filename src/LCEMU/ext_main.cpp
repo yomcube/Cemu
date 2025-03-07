@@ -87,169 +87,171 @@ static void ctrl_loop()
 			boost::trim(instr);
 			vector<string> strs = split_space(instr);
 			const string cmd = boost::to_upper_copy( strs[0]);
+
+			switch (cmd) {
+				case "PWD":
+					output(macro_dir.string());
+					break;
+				
+				case "CLS":
+					clear_screen();
+					break;
 			
-			if (cmd == "PWD")
-			{
-				output(macro_dir.string());
-			}
-			else if (cmd == "CLS")
-			{
-				clear_screen();
-			}
-			else if (cmd == "SEQPOS")
-			{
-				int py, px;
-				if (strs.size() < 3 || !try_int(strs[1], px, 0) || !try_int(strs[2], py, 0))
-				{
-					output("[ERROR] Arg error.");
-					continue;
-				}
-				keyseq_set_window_pos(px, py);
-			}
-			else if (cmd == "SEQCFG")
-			{
-				int pre_seq, now_pad, mode;
-				if (strs.size() < 4 || 
-					!try_int(strs[1], pre_seq, 0) || 
-					!try_int(strs[2], now_pad, 0) ||
-					!try_int(strs[3], mode, 0) ||
-					!keyseq_config_validate(pre_seq, now_pad, mode)
-					)
-				{
-					output("[ERROR] Arg error.");
-					continue;
-				}
-				keyseq_change_config(pre_seq, now_pad, mode);
-			}
+				case "SEQPOS":
+					int py, px;
+					if (strs.size() < 3 || !try_int(strs[1], px, 0) || !try_int(strs[2], py, 0))
+					{
+						output("[ERROR] Arg error.");
+						continue;
+					}
+					keyseq_set_window_pos(px, py);
+				break;
+				case "SEQCFG":
+					int pre_seq, now_pad, mode;
+					if (strs.size() < 4 || 
+						!try_int(strs[1], pre_seq, 0) || 
+						!try_int(strs[2], now_pad, 0) ||
+						!try_int(strs[3], mode, 0) ||
+						!keyseq_config_validate(pre_seq, now_pad, mode)
+						)
+					{
+						output("[ERROR] Arg error.");
+						continue;
+					}
+					keyseq_change_config(pre_seq, now_pad, mode);
+					break;
 
 #pragma region Macro
-			else if (cmd == "PRE")
-			{
-				output(prepath_str);
-			}
-			else if (cmd == "START" || cmd == "S" || cmd == "STARTWITH" || cmd == "SW")
-			{
-				macro_mgr.start(cmd == "STARTWITH" || cmd == "SW");
-				keyseq_refresh(true);
-				output("Started");
-			}
-			else if (cmd == "STOP" || cmd == "X")
-			{
-				macro_mgr.stop();
-				output("Stopped");
-			}
-			else if (cmd == "LOAD" || cmd == "L" || cmd == "RELOAD" || cmd == "R" || cmd == "RS" || cmd == "RSW")
-			{
-				const bool is_rs = cmd == "RS" || cmd == "RSW";
-				if (is_rs)
-					macro_mgr.stop();
-				if (macro_mgr.is_running())
-				{
-					output("[ERROR] Stop the running macro.");
-					output("Load failed");
-					continue;
-				}
-				else
-				{
-					const bool is_load = cmd == "LOAD" || cmd == "L";
-					if (is_load && strs.size() < 2)
-					{
-						output("[ERROR] Please specify a file.");
-						continue;
-					}
-					string path_str = (is_load)? strs[strs.size() - 1] : prepath_str;
-					if (is_load) prepath_str = path_str;
-					fs::path path;
-					if (!try_eval_relative(path_str, macro_dir, path))
-					{
-						output("[ERROR] File not found: " + path_str);
-						output("Load failed");
-						continue;
-					}
-					bool loadret;
-					{
-						std::lock_guard<std::mutex> _l(cout_mtx);
-						loadret = macro_mgr.load(path);
-					}
-					if (!loadret)
-					{
-						output("Load failed");
-						continue;
-					}
-					
-					output("Loaded: " + path_str);
-					output(format("{} frames", macro_mgr.get_total_frame_count()));
-					if (is_rs)
-					{
-						macro_mgr.start(cmd == "RSW");
-						output("Started");
-					}
+				case "PRE":
+					output(prepath_str);
+					break;
+			
+				case "START":
+				case "S":
+				case "STARTWITH":
+				case "SW":
+					macro_mgr.start(cmd == "STARTWITH" || cmd == "SW");
 					keyseq_refresh(true);
-				}
-			}
-			else if (cmd == "DUMPMACRO" || cmd == "DUMPMACRO2")
-			{
-				const auto& inputs = macro_mgr.get_all_inputs(); 
-				if (inputs.empty())
-				{
-					output("[ERROR] Macro is empty.");
-					continue;
-				}
-				int offset = 0;
-				if (strs.size() >= 2)
-				{
-					if (!try_int(strs[1], offset, 0))
+					output("Started");
+					break;
+				
+				case "STOP":
+					case "X":
+					macro_mgr.stop();
+					output("Stopped");
+					break;
+			
+				case "RS":	case "RSW":
+					macro_mgr.stop();
+				case "LOAD":    case "L":
+				case "RELOAD":  case "R":
+					if (macro_mgr.is_running())
 					{
-						output("[ERROR] Parse error.");
+						output("[ERROR] Stop the running macro.");
+						output("Load failed");
 						continue;
-					}
-					else if (offset >= inputs.size() || offset < 0)
-					{
-						output("[ERROR] Out of range.");
-						continue;
-					}
-				}
-				auto npath = macro_mgr.get_now_path().string() + ".dump.txt";
-				FILE* fp;
-				if (fopen_s(&fp, npath.c_str(), "w"))
-					output("[ERROR] Could not create a file.");
-				else
-				{
-					bool rle_style = cmd == "DUMPMACRO2";
-					if (rle_style)
-					{
-						fprintf(fp, "input,length\n");
 					}
 					else
 					{
-						fprintf(fp, "start(f),end(f),input\n");
-					}
-					string pre = inputs[offset];
-					int st = offset;
-					for (int i = offset + 1; i <= inputs.size(); i++)
-					{
-						if (inputs.size() == i || pre != inputs[i])
+						const bool is_load = cmd == "LOAD" || cmd == "L";
+						if (is_load && strs.size() < 2)
 						{
-							const int l = st + 1 - offset;
-							const int r = i - offset;
-							if (rle_style)
-							{
-								fprintf(fp, "%s,%d\n", pre.c_str(),r - l + 1);
-							}
-							else
-							{
-								fprintf(fp, "%d,%d,%s\n", l, r, pre.c_str());
-							}
-							st = i;
-							if (i < inputs.size())
-								pre = inputs[i];
+							output("[ERROR] Please specify a file.");
+							continue;
+						}
+						string path_str = (is_load)? strs[strs.size() - 1] : prepath_str;
+						if (is_load) prepath_str = path_str;
+						fs::path path;
+						if (!try_eval_relative(path_str, macro_dir, path))
+						{
+							output("[ERROR] File not found: " + path_str);
+							output("Load failed");
+							continue;
+						}
+						bool loadret;
+						{
+							std::lock_guard<std::mutex> _l(cout_mtx);
+							loadret = macro_mgr.load(path);
+						}
+						if (!loadret)
+						{
+							output("Load failed");
+							continue;
+						}
+						
+						output("Loaded: " + path_str);
+						output(format("{} frames", macro_mgr.get_total_frame_count()));
+						if (is_rs)
+						{
+							macro_mgr.start(cmd == "RSW");
+							output("Started");
+						}
+						keyseq_refresh(true);
+					}
+			
+				case "DUMPMACRO":
+				case "DUMPMACRO2":
+					const auto& inputs = macro_mgr.get_all_inputs(); 
+					if (inputs.empty())
+					{
+						output("[ERROR] Macro is empty.");
+						continue;
+					}
+					int offset = 0;
+					if (strs.size() >= 2)
+					{
+						if (!try_int(strs[1], offset, 0))
+						{
+							output("[ERROR] Parse error.");
+							continue;
+						}
+						else if (offset >= inputs.size() || offset < 0)
+						{
+							output("[ERROR] Out of range.");
+							continue;
 						}
 					}
-
-					fclose(fp);
-					output("Success");
-				}
-
+					auto npath = macro_mgr.get_now_path().string() + ".dump.txt";
+					FILE* fp;
+					if (fopen_s(&fp, npath.c_str(), "w"))
+						output("[ERROR] Could not create a file.");
+					else
+					{
+						bool rle_style = cmd == "DUMPMACRO2";
+						if (rle_style)
+						{
+							fprintf(fp, "input,length\n");
+						}
+						else
+						{
+							fprintf(fp, "start(f),end(f),input\n");
+						}
+						string pre = inputs[offset];
+						int st = offset;
+						for (int i = offset + 1; i <= inputs.size(); i++)
+						{
+							if (inputs.size() == i || pre != inputs[i])
+							{
+								const int l = st + 1 - offset;
+								const int r = i - offset;
+								if (rle_style)
+								{
+									fprintf(fp, "%s,%d\n", pre.c_str(),r - l + 1);
+								}
+								else
+								{
+									fprintf(fp, "%d,%d,%s\n", l, r, pre.c_str());
+								}
+								st = i;
+								if (i < inputs.size())
+									pre = inputs[i];
+							}
+						}
+	
+						fclose(fp);
+						output("Success");
+					}
+					break;
 			}
 #pragma endregion
 
